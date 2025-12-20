@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { playJumpSound, playCrashSound, playMilestoneSound, playSpeedUpSound } from "@/lib/sounds";
+import { playJumpSound, playCrashSound, playMilestoneSound, playSpeedUpSound, playPowerUpSound } from "@/lib/sounds";
 
 interface Obstacle {
   id: number;
@@ -20,6 +20,13 @@ interface Particle {
   color: string;
 }
 
+interface PowerUp {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+}
+
 const GROUND_Y = 120;
 const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 50;
@@ -30,6 +37,7 @@ const BASE_SPEED = 5;
 const SPEED_INCREMENT = 0.5;
 const SPAWN_INTERVAL_BASE = 1800;
 const SPAWN_INTERVAL_MIN = 800;
+const POWERUP_SIZE = 25;
 
 export const Game = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,12 +52,17 @@ export const Game = () => {
     playerY: GROUND_Y,
     velocityY: 0,
     isJumping: false,
+    hasDoubleJump: false,
+    usedDoubleJump: false,
     obstacles: [] as Obstacle[],
     particles: [] as Particle[],
+    powerUps: [] as PowerUp[],
     speed: BASE_SPEED,
     lastSpawn: 0,
+    lastPowerUpSpawn: 0,
     spawnInterval: SPAWN_INTERVAL_BASE,
     obstacleId: 0,
+    powerUpId: 0,
     lastMilestone: 0,
     lastSpeedLevel: 0,
     frameCount: 0,
@@ -100,12 +113,17 @@ export const Game = () => {
       playerY: GROUND_Y,
       velocityY: 0,
       isJumping: false,
+      hasDoubleJump: false,
+      usedDoubleJump: false,
       obstacles: [],
       particles: [],
+      powerUps: [],
       speed: BASE_SPEED,
       lastSpawn: 0,
+      lastPowerUpSpawn: 0,
       spawnInterval: SPAWN_INTERVAL_BASE,
       obstacleId: 0,
+      powerUpId: 0,
       lastMilestone: 0,
       lastSpeedLevel: 0,
       frameCount: 0,
@@ -127,11 +145,35 @@ export const Game = () => {
       return;
     }
 
-    if (!gameRef.current.isJumping) {
-      gameRef.current.velocityY = JUMP_FORCE;
-      gameRef.current.isJumping = true;
+    const game = gameRef.current;
+    
+    // First jump (from ground)
+    if (!game.isJumping) {
+      game.velocityY = JUMP_FORCE;
+      game.isJumping = true;
+      game.usedDoubleJump = false;
       playJumpSound();
       spawnJumpParticles();
+    } 
+    // Double jump (in air, if power-up collected)
+    else if (game.hasDoubleJump && !game.usedDoubleJump) {
+      game.velocityY = JUMP_FORCE * 0.85;
+      game.usedDoubleJump = true;
+      game.hasDoubleJump = false;
+      playJumpSound();
+      // Spawn particles at current position
+      for (let i = 0; i < 6; i++) {
+        game.particles.push({
+          x: PLAYER_X + PLAYER_WIDTH / 2 + (Math.random() - 0.5) * 15,
+          y: game.playerY + PLAYER_HEIGHT / 2,
+          vx: (Math.random() - 0.5) * 3,
+          vy: (Math.random() - 0.5) * 3,
+          life: 1,
+          maxLife: 1,
+          size: Math.random() * 3 + 2,
+          color: "hsl(60, 100%, 60%)",
+        });
+      }
     }
   }, [gameState, resetGame, spawnJumpParticles]);
 
@@ -264,13 +306,59 @@ export const Game = () => {
         game.lastSpawn = game.frameCount;
       }
 
+      // Spawn power-ups occasionally (every ~500 frames, roughly every 8 seconds)
+      if (game.frameCount - game.lastPowerUpSpawn > 500 && Math.random() < 0.02) {
+        game.powerUps.push({
+          id: game.powerUpId++,
+          x: canvas.width + 50,
+          y: GROUND_Y + 80 + Math.random() * 60,
+          size: POWERUP_SIZE,
+        });
+        game.lastPowerUpSpawn = game.frameCount;
+      }
+
       // Update obstacles
       game.obstacles = game.obstacles.filter((obs) => {
         obs.x -= game.speed;
         return obs.x > -100;
       });
 
-      // Check collisions
+      // Update power-ups and check collection
+      game.powerUps = game.powerUps.filter((pu) => {
+        pu.x -= game.speed;
+        
+        // Check if player collects power-up
+        const playerCenterX = PLAYER_X + PLAYER_WIDTH / 2;
+        const playerCenterY = game.playerY + PLAYER_HEIGHT / 2;
+        const dist = Math.sqrt(
+          Math.pow(pu.x - playerCenterX, 2) + 
+          Math.pow(pu.y - playerCenterY, 2)
+        );
+        
+        if (dist < pu.size + 20) {
+          game.hasDoubleJump = true;
+          playPowerUpSound();
+          // Spawn collection particles
+          for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 * i) / 12;
+            game.particles.push({
+              x: pu.x,
+              y: pu.y,
+              vx: Math.cos(angle) * 4,
+              vy: Math.sin(angle) * 4,
+              life: 1,
+              maxLife: 1,
+              size: 4,
+              color: "hsl(60, 100%, 60%)",
+            });
+          }
+          return false;
+        }
+        
+        return pu.x > -50;
+      });
+
+      // Check collisions with obstacles
       for (const obs of game.obstacles) {
         if (checkCollision(obs)) {
           spawnDeathParticles();
@@ -341,6 +429,38 @@ export const Game = () => {
         ctx.fillRect(obs.x, obsScreenY, obs.width, obs.height);
       }
       ctx.shadowBlur = 0;
+
+      // Draw power-ups
+      for (const pu of game.powerUps) {
+        const puScreenY = canvas.height - pu.y;
+        const pulse = Math.sin(Date.now() / 150) * 0.2 + 1;
+        
+        // Outer glow
+        ctx.fillStyle = "hsl(60, 100%, 60%)";
+        ctx.shadowColor = "hsl(60, 100%, 70%)";
+        ctx.shadowBlur = 25;
+        ctx.beginPath();
+        ctx.arc(pu.x, puScreenY, pu.size * pulse, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Inner core
+        ctx.fillStyle = "hsl(45, 100%, 80%)";
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(pu.x, puScreenY, pu.size * 0.5 * pulse, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+
+      // Draw double-jump indicator on player if they have it
+      if (game.hasDoubleJump) {
+        ctx.strokeStyle = "hsl(60, 100%, 60%)";
+        ctx.lineWidth = 2;
+        ctx.shadowColor = "hsl(60, 100%, 70%)";
+        ctx.shadowBlur = 10;
+        ctx.strokeRect(PLAYER_X - 3, playerScreenY - 3, PLAYER_WIDTH + 6, PLAYER_HEIGHT + 6);
+        ctx.shadowBlur = 0;
+      }
 
       // Draw particles
       for (const p of game.particles) {
