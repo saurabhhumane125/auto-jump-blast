@@ -6,7 +6,18 @@ interface Obstacle {
   x: number;
   width: number;
   height: number;
-  y: number; // for flying obstacles
+  y: number;
+}
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  color: string;
 }
 
 const GROUND_Y = 120;
@@ -34,6 +45,7 @@ export const Game = () => {
     velocityY: 0,
     isJumping: false,
     obstacles: [] as Obstacle[],
+    particles: [] as Particle[],
     speed: BASE_SPEED,
     lastSpawn: 0,
     spawnInterval: SPAWN_INTERVAL_BASE,
@@ -44,12 +56,52 @@ export const Game = () => {
     startTime: 0,
   });
 
+  const spawnJumpParticles = useCallback(() => {
+    const game = gameRef.current;
+    for (let i = 0; i < 8; i++) {
+      game.particles.push({
+        x: PLAYER_X + PLAYER_WIDTH / 2 + (Math.random() - 0.5) * 20,
+        y: GROUND_Y + 5,
+        vx: (Math.random() - 0.5) * 4,
+        vy: Math.random() * 3 + 1,
+        life: 1,
+        maxLife: 1,
+        size: Math.random() * 4 + 2,
+        color: "hsl(180, 100%, 60%)",
+      });
+    }
+  }, []);
+
+  const spawnDeathParticles = useCallback(() => {
+    const game = gameRef.current;
+    const centerX = PLAYER_X + PLAYER_WIDTH / 2;
+    const centerY = game.playerY + PLAYER_HEIGHT / 2;
+    
+    for (let i = 0; i < 30; i++) {
+      const angle = (Math.PI * 2 * i) / 30 + Math.random() * 0.5;
+      const speed = Math.random() * 8 + 4;
+      const isSecondary = Math.random() > 0.5;
+      
+      game.particles.push({
+        x: centerX,
+        y: centerY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        maxLife: 1,
+        size: Math.random() * 6 + 3,
+        color: isSecondary ? "hsl(320, 100%, 60%)" : "hsl(180, 100%, 60%)",
+      });
+    }
+  }, []);
+
   const resetGame = useCallback(() => {
     gameRef.current = {
       playerY: GROUND_Y,
       velocityY: 0,
       isJumping: false,
       obstacles: [],
+      particles: [],
       speed: BASE_SPEED,
       lastSpawn: 0,
       spawnInterval: SPAWN_INTERVAL_BASE,
@@ -79,8 +131,9 @@ export const Game = () => {
       gameRef.current.velocityY = JUMP_FORCE;
       gameRef.current.isJumping = true;
       playJumpSound();
+      spawnJumpParticles();
     }
-  }, [gameState, resetGame]);
+  }, [gameState, resetGame, spawnJumpParticles]);
 
   // Handle input
   useEffect(() => {
@@ -220,6 +273,7 @@ export const Game = () => {
       // Check collisions
       for (const obs of game.obstacles) {
         if (checkCollision(obs)) {
+          spawnDeathParticles();
           setGameState("dead");
           playCrashSound();
           if (score > highScore) {
@@ -229,6 +283,15 @@ export const Game = () => {
           return;
         }
       }
+
+      // Update particles
+      game.particles = game.particles.filter((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy -= 0.15; // gravity
+        p.life -= 0.02;
+        return p.life > 0;
+      });
 
       // Update score
       const newScore = Math.floor(elapsedSeconds * 10);
@@ -279,6 +342,19 @@ export const Game = () => {
       }
       ctx.shadowBlur = 0;
 
+      // Draw particles
+      for (const p of game.particles) {
+        const particleScreenY = canvas.height - p.y;
+        const alpha = p.life / p.maxLife;
+        ctx.fillStyle = p.color.replace(")", ` / ${alpha})`).replace("hsl", "hsl");
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(p.x, particleScreenY, p.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+
       // Draw scanlines effect
       ctx.fillStyle = "rgba(0, 0, 0, 0.02)";
       for (let i = 0; i < canvas.height; i += 4) {
@@ -297,7 +373,7 @@ export const Game = () => {
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [gameState, score, highScore]);
+  }, [gameState, score, highScore, spawnDeathParticles]);
 
   // Draw static state
   useEffect(() => {
