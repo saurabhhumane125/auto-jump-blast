@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { playJumpSound, playCrashSound, playMilestoneSound, playSpeedUpSound } from "@/lib/sounds";
 
 interface Obstacle {
   id: number;
@@ -37,6 +38,8 @@ export const Game = () => {
     lastSpawn: 0,
     spawnInterval: SPAWN_INTERVAL_BASE,
     obstacleId: 0,
+    lastMilestone: 0,
+    lastSpeedLevel: 0,
     frameCount: 0,
     startTime: 0,
   });
@@ -51,6 +54,8 @@ export const Game = () => {
       lastSpawn: 0,
       spawnInterval: SPAWN_INTERVAL_BASE,
       obstacleId: 0,
+      lastMilestone: 0,
+      lastSpeedLevel: 0,
       frameCount: 0,
       startTime: Date.now(),
     };
@@ -73,6 +78,7 @@ export const Game = () => {
     if (!gameRef.current.isJumping) {
       gameRef.current.velocityY = JUMP_FORCE;
       gameRef.current.isJumping = true;
+      playJumpSound();
     }
   }, [gameState, resetGame]);
 
@@ -185,6 +191,13 @@ export const Game = () => {
       // Difficulty scaling
       const elapsedSeconds = (Date.now() - game.startTime) / 1000;
       const speedLevel = Math.floor(elapsedSeconds / 10);
+      
+      // Play speed up sound when level increases
+      if (speedLevel > game.lastSpeedLevel) {
+        game.lastSpeedLevel = speedLevel;
+        playSpeedUpSound();
+      }
+      
       game.speed = BASE_SPEED + speedLevel * SPEED_INCREMENT;
       game.spawnInterval = Math.max(
         SPAWN_INTERVAL_MIN,
@@ -208,6 +221,7 @@ export const Game = () => {
       for (const obs of game.obstacles) {
         if (checkCollision(obs)) {
           setGameState("dead");
+          playCrashSound();
           if (score > highScore) {
             setHighScore(score);
             localStorage.setItem("neonRunnerHighScore", score.toString());
@@ -217,7 +231,16 @@ export const Game = () => {
       }
 
       // Update score
-      setScore(Math.floor(elapsedSeconds * 10));
+      const newScore = Math.floor(elapsedSeconds * 10);
+      
+      // Play milestone sound every 100 points
+      const currentMilestone = Math.floor(newScore / 100);
+      if (currentMilestone > game.lastMilestone) {
+        game.lastMilestone = currentMilestone;
+        playMilestoneSound();
+      }
+      
+      setScore(newScore);
     };
 
     const draw = () => {
