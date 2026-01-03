@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { playJumpSound, playCrashSound, playMilestoneSound, playSpeedUpSound, playPowerUpSound } from "@/lib/sounds";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface Obstacle {
   id: number;
@@ -41,12 +42,31 @@ const POWERUP_SIZE = 25;
 
 export const Game = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [gameState, setGameState] = useState<"idle" | "playing" | "dead">("idle");
   const [score, setScore] = useState(0);
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 400 });
+  const isMobile = useIsMobile();
   const [highScore, setHighScore] = useState(() => {
     const saved = localStorage.getItem("neonRunnerHighScore");
     return saved ? parseInt(saved) : 0;
   });
+
+  // Responsive canvas sizing
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const containerWidth = containerRef.current.offsetWidth;
+        const maxWidth = Math.min(containerWidth, 800);
+        const height = maxWidth * 0.5; // maintain 2:1 aspect ratio
+        setCanvasSize({ width: maxWidth, height });
+      }
+    };
+
+    updateSize();
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
 
   const gameRef = useRef({
     playerY: GROUND_Y,
@@ -177,7 +197,7 @@ export const Game = () => {
     }
   }, [gameState, resetGame, spawnJumpParticles]);
 
-  // Handle input
+  // Handle input (keyboard only - touch handled by button on mobile)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" || e.code === "ArrowUp") {
@@ -186,24 +206,18 @@ export const Game = () => {
       }
     };
 
-    const handleTouch = (e: TouchEvent) => {
-      e.preventDefault();
-      jump();
-    };
-
-    const handleClick = () => {
-      jump();
-    };
-
     window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("touchstart", handleTouch, { passive: false });
-    window.addEventListener("click", handleClick);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("touchstart", handleTouch);
-      window.removeEventListener("click", handleClick);
     };
+  }, [jump]);
+
+  // Handle canvas click/touch (non-mobile or when not using button)
+  const handleCanvasInteraction = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    jump();
   }, [jump]);
 
   // Game loop
@@ -535,66 +549,122 @@ export const Game = () => {
     }
   }, [gameState]);
 
+  // Calculate scale factor for responsive canvas drawing
+  const scaleFactor = canvasSize.width / 800;
+
   return (
-    <div className="relative w-full max-w-4xl mx-auto">
+    <div 
+      ref={containerRef} 
+      className="relative w-full max-w-4xl mx-auto select-none"
+      style={{ touchAction: 'manipulation' }}
+    >
       {/* Score display */}
-      <div className="absolute top-4 left-4 z-10 font-display">
-        <div className="text-2xl text-game-score neon-text-score">
+      <div className="absolute top-2 md:top-4 left-2 md:left-4 z-10 font-display">
+        <div className="text-lg md:text-2xl text-game-score neon-text-score">
           {score.toString().padStart(5, "0")}
         </div>
-        <div className="text-sm text-muted-foreground mt-1">
+        <div className="text-xs md:text-sm text-muted-foreground mt-1">
           HI: {highScore.toString().padStart(5, "0")}
         </div>
       </div>
 
+      {/* Double jump indicator */}
+      {gameRef.current.hasDoubleJump && gameState === "playing" && (
+        <div className="absolute top-2 md:top-4 right-2 md:right-4 z-10">
+          <div className="text-xs md:text-sm text-yellow-400 font-display animate-pulse-glow">
+            2x JUMP
+          </div>
+        </div>
+      )}
+
       {/* Game canvas */}
       <canvas
         ref={canvasRef}
-        width={800}
-        height={400}
-        className="w-full h-auto border border-border rounded-lg neon-box"
+        width={canvasSize.width}
+        height={canvasSize.height}
+        className="w-full h-auto border border-border rounded-lg neon-box cursor-pointer"
+        onClick={!isMobile ? handleCanvasInteraction : undefined}
+        onTouchStart={!isMobile ? handleCanvasInteraction : undefined}
       />
 
       {/* Overlays */}
       {gameState === "idle" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm rounded-lg">
-          <h2 className="font-display text-4xl text-primary neon-text mb-4 animate-pulse-glow">
+        <div 
+          className="absolute inset-0 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm rounded-lg px-4"
+          onClick={handleCanvasInteraction}
+          onTouchStart={handleCanvasInteraction}
+        >
+          <h2 className="font-display text-2xl md:text-4xl text-primary neon-text mb-2 md:mb-4 animate-pulse-glow text-center">
             NEON RUN
           </h2>
-          <p className="text-foreground/80 text-lg mb-8">
-            Press <span className="text-primary">SPACE</span> or{" "}
-            <span className="text-primary">TAP</span> to start
+          <p className="text-foreground/80 text-sm md:text-lg mb-4 md:mb-8 text-center">
+            {isMobile ? (
+              <>Tap <span className="text-primary">JUMP</span> to start</>
+            ) : (
+              <>Press <span className="text-primary">SPACE</span> or <span className="text-primary">CLICK</span> to start</>
+            )}
           </p>
-          <div className="text-muted-foreground text-sm">
+          <div className="text-muted-foreground text-xs md:text-sm text-center">
             Avoid the <span className="text-secondary">obstacles</span>
           </div>
         </div>
       )}
 
       {gameState === "dead" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm rounded-lg">
-          <h2 className="font-display text-4xl text-destructive mb-2">
+        <div 
+          className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm rounded-lg px-4"
+          onClick={handleCanvasInteraction}
+          onTouchStart={handleCanvasInteraction}
+        >
+          <h2 className="font-display text-2xl md:text-4xl text-destructive mb-2">
             GAME OVER
           </h2>
-          <p className="text-3xl font-display text-game-score neon-text-score mb-4">
+          <p className="text-xl md:text-3xl font-display text-game-score neon-text-score mb-2 md:mb-4">
             {score}
           </p>
           {score >= highScore && score > 0 && (
-            <p className="text-primary text-lg mb-4 animate-pulse-glow">
+            <p className="text-primary text-sm md:text-lg mb-2 md:mb-4 animate-pulse-glow">
               NEW HIGH SCORE!
             </p>
           )}
-          <p className="text-foreground/80">
-            Press <span className="text-primary">SPACE</span> or{" "}
-            <span className="text-primary">TAP</span> to retry
+          <p className="text-foreground/80 text-sm md:text-base text-center">
+            {isMobile ? (
+              <>Tap <span className="text-primary">JUMP</span> to retry</>
+            ) : (
+              <>Press <span className="text-primary">SPACE</span> or <span className="text-primary">CLICK</span> to retry</>
+            )}
           </p>
         </div>
       )}
 
-      {/* Controls hint */}
-      {gameState === "playing" && (
+      {/* Mobile Jump Button */}
+      {isMobile && (
+        <button
+          onTouchStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            jump();
+          }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 
+            w-32 h-16 rounded-xl
+            bg-primary/20 border-2 border-primary
+            text-primary font-display text-xl
+            active:bg-primary/40 active:scale-95
+            transition-all duration-100
+            select-none touch-none"
+          style={{
+            boxShadow: '0 0 20px hsl(180 100% 50% / 0.5), 0 0 40px hsl(180 100% 50% / 0.2)',
+            touchAction: 'none'
+          }}
+        >
+          JUMP
+        </button>
+      )}
+
+      {/* Controls hint - desktop only */}
+      {gameState === "playing" && !isMobile && (
         <div className="absolute bottom-4 right-4 text-muted-foreground text-xs">
-          SPACE / TAP to jump
+          SPACE / CLICK to jump
         </div>
       )}
     </div>

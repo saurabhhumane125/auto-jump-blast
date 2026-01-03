@@ -65,9 +65,18 @@
     @apply border-border;
   }
 
+  html {
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'JetBrains Mono', monospace;
+    overscroll-behavior: none;
+    touch-action: pan-x pan-y;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   h1, h2, h3, h4, h5, h6 {
